@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 4, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/ganga/Desktop/praegler-shiftplanner/src/components/MobileShell.jsx"],"sourcesContent":["export default function MobileShell({ children }) {\r\n  return (\r\n    <div className=\"min-h-screen px-4 py-6 flex justify-center\">\r\n      <div className=\"w-full max-w-md\">{children}</div>\r\n    </div>\r\n  );\r\n}\r\n"],"names":[],"mappings":";;;;;;AAAe,SAAS,YAAY,EAAE,QAAQ,EAAE;IAC9C,qBACE,8OAAC;QAAI,WAAU;kBACb,cAAA,8OAAC;YAAI,WAAU;sBAAmB;;;;;;;;;;;AAGxC"}},
+    {"offset": {"line": 31, "column": 0}, "map": {"version":3,"sources":["file:///C:/Users/ganga/Desktop/praegler-shiftplanner/src/app/%28auth%29/layout.jsx"],"sourcesContent":["import MobileShell from \"@/components/MobileShell\";\r\n\r\nexport default function AuthLayout({ children }) {\r\n  return (\r\n    <MobileShell>\r\n      <div className=\"rounded-2xl bg-[#0f1620] border border-white/10 shadow p-6\">\r\n        <div className=\"mb-6\">\r\n          <h1 className=\"text-xl font-semibold\">Praegler Shift Planner</h1>\r\n          <p className=\"text-sm text-white/60\">Ingl Praegler GmbH</p>\r\n        </div>\r\n        {children}\r\n      </div>\r\n    </MobileShell>\r\n  );\r\n}\r\n"],"names":[],"mappings":";;;;;AAAA;;;AAEe,SAAS,WAAW,EAAE,QAAQ,EAAE;IAC7C,qBACE,8OAAC,4IAAW;kBACV,cAAA,8OAAC;YAAI,WAAU;;8BACb,8OAAC;oBAAI,WAAU;;sCACb,8OAAC;4BAAG,WAAU;sCAAwB;;;;;;sCACtC,8OAAC;4BAAE,WAAU;sCAAwB;;;;;;;;;;;;gBAEtC;;;;;;;;;;;;AAIT"}}]
+}
