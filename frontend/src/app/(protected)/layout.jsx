@@ -6,6 +6,7 @@ import pb from "@/lib/pb";
 import { ensurePbAlive } from "@/lib/pbHealth";
 import FullscreenLoader from "@/components/FullscreenLoader";
 import MobileShell from "@/components/MobileShell";
+import TopNav from "@/components/TopNav";
 
 export default function ProtectedLayout({ children }) {
   const router = useRouter();
@@ -19,15 +20,12 @@ export default function ProtectedLayout({ children }) {
     ranRef.current = true;
 
     async function init() {
-      // 1) Wait for PocketBase (prevents random "cannot reach" flashes)
       const alive = await ensurePbAlive();
       if (!alive) {
-        // keep loader; user can start PB and refresh
         ranRef.current = false; // allow retry
         return;
       }
 
-      // 2) Auth check (use pb auth store globally)
       if (!pb.authStore.isValid) {
         router.replace(`/login?next=${encodeURIComponent(pathname)}`);
         return;
@@ -41,11 +39,24 @@ export default function ProtectedLayout({ children }) {
 
   if (!ready) return <FullscreenLoader label="Checking session..." />;
 
+  const isWeekly = pathname?.startsWith("/app/weekly");
+  const shellVariant = isWeekly ? "wide" : "narrow";
+
   return (
-    <MobileShell>
-      <div className="rounded-2xl bg-[#0f1620] border border-white/10 shadow p-6">
-        {children}
-      </div>
-    </MobileShell>
+    <div className="min-h-screen">
+      <TopNav />
+
+      <MobileShell variant={shellVariant}>
+        <div
+          className={
+            isWeekly
+              ? "rounded-2xl bg-[#0f1620] border border-white/10 shadow p-3 md:p-4"
+              : "rounded-2xl bg-[#0f1620] border border-white/10 shadow p-6"
+          }
+        >
+          {children}
+        </div>
+      </MobileShell>
+    </div>
   );
 }
