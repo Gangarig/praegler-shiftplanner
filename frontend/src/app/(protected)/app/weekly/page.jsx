@@ -6,71 +6,33 @@ import { safeCall } from "@/lib/api";
 import { isAdminOrBoss } from "@/lib/roles";
 import WeeklyGrid from "@/components/weekly/WeeklyGrid";
 import WorkersPanel from "@/components/weekly/WorkersPanel";
-import WorkerModal from "@/components/weekly/WorkerModal";
-import { startOfWeekMonday, addDays, toYMD } from "@/lib/dates";
-
-import { DndContext, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
-
-function weekdayKey(i) {
-  return ["mon", "tue", "wed", "thu", "fri"][i] || "mon";
-}
-
-function buildWeekDays(weekStart) {
-  // Mon..Fri only
-  return Array.from({ length: 5 }).map((_, i) => {
-    const d = addDays(weekStart, i);
-    return { i, key: weekdayKey(i), ymd: toYMD(d), date: d };
-  });
-}
-
-function ensurePlanCell(plan, ymd, stationId) {
-  const next = { ...plan };
-  next[ymd] = next[ymd] ? { ...next[ymd] } : {};
-  next[ymd][stationId] = next[ymd][stationId] ? [...next[ymd][stationId]] : [];
-  return next;
-}
-
-function removeWorkerEverywhere(plan, workerId) {
-  const next = {};
-  for (const ymd of Object.keys(plan || {})) {
-    next[ymd] = {};
-    for (const sid of Object.keys(plan[ymd] || {})) {
-      next[ymd][sid] = (plan[ymd][sid] || []).filter((id) => id !== workerId);
-    }
-  }
-  return next;
-}
+import { startOfWeekMonday } from "@/lib/dates";
+import { toYMD, addDays } from "@/lib/dates";
+import { loadWeeklyPlan, saveWeeklyPlan } from "@/lib/weeklyPlan";
 
 export default function WeeklyPage() {
   const editable = isAdminOrBoss();
 
   const [stations, setStations] = useState([]);
   const [workers, setWorkers] = useState([]);
-
-  // plan: { [ymd]: { [stationId]: workerId[] } }
-  const [plan, setPlan] = useState({});
-
-  // worker meta (status/note/defaults)
-  const [workerMeta, setWorkerMeta] = useState({});
+  const [plan, setPlan] = useState({}); // plan[dateYMD][stationId] = [workerId...]
 
   const [err, setErr] = useState(null);
+  const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(true);
-
-  const [selectedWorker, setSelectedWorker] = useState(null); // worker object
-  const [selectedDayYMD, setSelectedDayYMD] = useState(null); // optional context
+  const [saving, setSaving] = useState(false);
 
   const weekStart = useMemo(() => startOfWeekMonday(new Date()), []);
-  const days = useMemo(() => buildWeekDays(weekStart), [weekStart]);
+  const weekStartYMD = useMemo(() => toYMD(weekStart), [weekStart]);
 
-  // DnD sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
-    })
-  );
+  const days = useMemo(() => {
+    // Mon..Fri
+    return Array.from({ length: 5 }, (_, i) => toYMD(addDays(weekStart, i)));
+  }, [weekStart]);
 
   async function load() {
     setErr(null);
+    setMsg(null);
     setLoading(true);
 
     const stationsRes = await safeCall(() =>
@@ -87,207 +49,161 @@ export default function WeeklyPage() {
     if (!stationsRes.ok) setErr(stationsRes.error);
     if (!workersRes.ok) setErr(workersRes.error);
 
-    setStations(stationsRes.ok ? stationsRes.data : []);
-    setWorkers(workersRes.ok ? workersRes.data : []);
+    const nextStations = stationsRes.ok ? stationsRes.data : [];
+    const nextWorkers = workersRes.ok ? workersRes.data : [];
+    setStations(nextStations);
+    setWorkers(nextWorkers);
+
+    // Load saved weekly plan (if any)
+    const planRes = await safeCall(() => loadWeeklyPlan(weekStartYMD));
+    if (planRes.ok && planRes.data?.data) {
+      setPlan(planRes.data.data);
+    } else {
+      // default empty plan shape
+      setPlan({});
+    }
 
     setLoading(false);
   }
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Apply defaults into the current week (only fills empty cells; doesn’t overwrite manual drops)
-  function applyDefaultsToWeek(meta = workerMeta) {
-    setPlan((prev) => {
-      let next = { ...(prev || {}) };
-
-      for (const w of workers) {
-        const wm = meta[w.id];
-        const defaults = wm?.defaults;
-        if (!defaults) continue;
-
-        days.forEach((d, idx) => {
-          const sid = defaults[d.key];
-          if (!sid) return;
-
-          next = ensurePlanCell(next, d.ymd, sid);
-
-          // don’t duplicate
-          if (!next[d.ymd][sid].includes(w.id)) {
-            next[d.ymd][sid].push(w.id);
-          }
-        });
-      }
-
-      return next;
-    });
-  }
-
-  function onDragEnd(event) {
+  async function onSave() {
     if (!editable) return;
+    setSaving(true);
+    setMsg(null);
+    setErr(null);
 
-    const { active, over } = event;
-    if (!over) return;
+    const res = await safeCall(() =>
+      saveWeeklyPlan({
+        weekStartYMD,
+        data: plan,
+      })
+    );
 
-    // dragged worker id
-    const workerId = active.id;
+    if (!res.ok) {
+      setErr(res.error);
+      setSaving(false);
+      return;
+    }
 
-    // drop target id example: "cell:2026-01-21:stationId"
-    const overId = String(over.id);
-    if (!overId.startsWith("cell:")) return;
+    setMsg("Saved.");
+    setSaving(false);
+  }
 
-    const [, ymd, stationId] = overId.split(":");
-    if (!ymd || !stationId) return;
+  function onPrint() {
+    window.print();
+  }
 
-    setPlan((prev) => {
-      // move worker (remove from everywhere first -> simple, avoids duplicates)
-      let next = removeWorkerEverywhere(prev || {}, workerId);
-      next = ensurePlanCell(next, ymd, stationId);
+  async function onShare() {
+    const url = window.location.href;
 
-      // add to that cell
-      if (!next[ymd][stationId].includes(workerId)) {
-        next[ymd][stationId].push(workerId);
+    // Web Share API (mobile friendly)
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Weekly plan",
+          text: `Weekly plan starting ${weekStartYMD}`,
+          url,
+        });
+        return;
+      } catch {
+        // user canceled → ignore
       }
+    }
 
-      return next;
-    });
-  }
-
-  function openWorkerModal(worker, dayYMD = null) {
-    setSelectedWorker(worker);
-    setSelectedDayYMD(dayYMD);
-  }
-
-  function closeWorkerModal() {
-    setSelectedWorker(null);
-    setSelectedDayYMD(null);
-  }
-
-  function updateWorkerMeta(workerId, patch) {
-    setWorkerMeta((prev) => {
-      const current = prev[workerId] || {};
-      const next = { ...prev, [workerId]: { ...current, ...patch } };
-      return next;
-    });
-  }
-
-  function setStatusForDay(workerId, ymd, status) {
-    setWorkerMeta((prev) => {
-      const current = prev[workerId] || {};
-      const statusByYmd = { ...(current.statusByYmd || {}) };
-      if (!status) delete statusByYmd[ymd];
-      else statusByYmd[ymd] = status;
-
-      return {
-        ...prev,
-        [workerId]: { ...current, statusByYmd },
-      };
-    });
-  }
-
-  function setNoteForDay(workerId, ymd, note) {
-    setWorkerMeta((prev) => {
-      const current = prev[workerId] || {};
-      const noteByYmd = { ...(current.noteByYmd || {}) };
-      if (!note) delete noteByYmd[ymd];
-      else noteByYmd[ymd] = note;
-
-      return {
-        ...prev,
-        [workerId]: { ...current, noteByYmd },
-      };
-    });
-  }
-
-  function setDefaults(workerId, defaults) {
-    setWorkerMeta((prev) => {
-      const current = prev[workerId] || {};
-      const next = {
-        ...prev,
-        [workerId]: { ...current, defaults: { ...defaults } },
-      };
-      return next;
-    });
-
-    // also apply immediately into this week
-    const metaNext = {
-      ...workerMeta,
-      [workerId]: { ...(workerMeta[workerId] || {}), defaults: { ...defaults } },
-    };
-    applyDefaultsToWeek(metaNext);
+    // fallback: copy
+    await navigator.clipboard.writeText(url);
+    setMsg("Link copied.");
   }
 
   return (
     <div className="space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base sm:text-lg font-semibold">Weekly plan</h2>
-          <div className="text-[10px] sm:text-xs text-white/50">
-            Mon–Fri • {editable ? "Edit (admin/boss)" : "View (worker)"}
+      {/* print styles */}
+      <style>{`
+        @media print {
+          body { background: white !important; color: black !important; }
+          nav, .no-print { display: none !important; }
+          .print-area { box-shadow: none !important; border: none !important; padding: 0 !important; }
+          @page { size: A4 landscape; margin: 10mm; }
+        }
+      `}</style>
+
+      <div className="flex items-start justify-between gap-2 no-print">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold">Weekly plan</h2>
+          <div className="text-xs text-white/50">
+            Week start: {weekStartYMD} ({editable ? "edit" : "view"})
           </div>
         </div>
 
-        <button
-          onClick={load}
-          className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm text-white/70 hover:text-white"
-        >
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={load}
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-white/70 hover:text-white"
+          >
+            Refresh
+          </button>
+
+          <button
+            onClick={onSave}
+            disabled={!editable || saving}
+            className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-black disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+
+          <button
+            onClick={onPrint}
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-white/70 hover:text-white"
+          >
+            Print
+          </button>
+
+          <button
+            onClick={onShare}
+            className="rounded-lg border border-white/10 bg-black/20 px-2.5 py-1.5 text-xs text-white/70 hover:text-white"
+          >
+            Share
+          </button>
+        </div>
       </div>
 
       {err && (
-        <pre className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200 whitespace-pre-wrap">
+        <pre className="rounded-xl border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-200 whitespace-pre-wrap">
           {err}
         </pre>
+      )}
+
+      {msg && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs text-emerald-200">
+          {msg}
+        </div>
       )}
 
       {loading ? (
         <div className="text-sm text-white/60">Loading…</div>
       ) : (
-        <DndContext sensors={sensors} onDragEnd={onDragEnd}>
-          <div className="grid gap-3 lg:grid-cols-[1fr_320px] lg:items-start">
-            {/* GRID */}
-            <div className="min-w-0">
-              <WeeklyGrid
-                stations={stations}
-                days={days}
-                workers={workers}
-                plan={plan}
-                workerMeta={workerMeta}
-                editable={editable}
-                onWorkerClick={openWorkerModal}
-              />
-            </div>
+        <div className="print-area">
+          {/* Desktop: 2 columns. Mobile: stack (grid first, workers below). No inner scroll. */}
+          <div className="grid gap-3 lg:grid-cols-[1fr_280px]">
+            <WeeklyGrid
+              stations={stations}
+              workers={workers}
+              days={days}
+              plan={plan}
+              setPlan={setPlan}
+              editable={editable}
+            />
 
-            {/* WORKERS LIST (desktop only) */}
-            <div className="hidden lg:block">
-              <WorkersPanel
-                workers={workers}
-                stations={stations}
-                workerMeta={workerMeta}
-                editable={editable}
-                onWorkerClick={openWorkerModal}
-              />
+            <div className="no-print">
+              <WorkersPanel workers={workers} editable={editable} />
             </div>
           </div>
-
-          {/* MOBILE: keep only grid visible, but allow opening workers modal from inside grid later */}
-        </DndContext>
-      )}
-
-      {selectedWorker && (
-        <WorkerModal
-          worker={selectedWorker}
-          stations={stations}
-          days={days}
-          selectedDayYMD={selectedDayYMD}
-          meta={workerMeta[selectedWorker.id] || {}}
-          onClose={closeWorkerModal}
-          onSetStatus={(ymd, status) => setStatusForDay(selectedWorker.id, ymd, status)}
-          onSetNote={(ymd, note) => setNoteForDay(selectedWorker.id, ymd, note)}
-          onSetDefaults={(defaults) => setDefaults(selectedWorker.id, defaults)}
-        />
+        </div>
       )}
     </div>
   );
