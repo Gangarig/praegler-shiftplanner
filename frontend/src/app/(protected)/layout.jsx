@@ -12,7 +12,6 @@ export default function ProtectedLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname();
   const [ready, setReady] = useState(false);
-
   const ranRef = useRef(false);
 
   useEffect(() => {
@@ -22,7 +21,7 @@ export default function ProtectedLayout({ children }) {
     async function init() {
       const alive = await ensurePbAlive();
       if (!alive) {
-        ranRef.current = false; // allow retry
+        ranRef.current = false;
         return;
       }
 
@@ -39,21 +38,13 @@ export default function ProtectedLayout({ children }) {
 
   if (!ready) return <FullscreenLoader label="Checking session..." />;
 
-  const isWeekly = pathname?.startsWith("/app/weekly");
-  const shellVariant = isWeekly ? "wide" : "narrow";
+  const wide = pathname?.startsWith("/app/weekly");
 
   return (
     <div className="min-h-screen">
       <TopNav />
-
-      <MobileShell variant={shellVariant}>
-        <div
-          className={
-            isWeekly
-              ? "rounded-2xl bg-[#0f1620] border border-white/10 shadow p-3 md:p-4"
-              : "rounded-2xl bg-[#0f1620] border border-white/10 shadow p-6"
-          }
-        >
+      <MobileShell wide={wide}>
+        <div className="rounded-2xl bg-[#0f1620] border border-white/10 shadow p-4 md:p-6">
           {children}
         </div>
       </MobileShell>
