@@ -1,58 +1,100 @@
 "use client";
 
-import { useEffect } from "react";
-import {
-  DndContext,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  closestCenter,
-} from "@dnd-kit/core";
-import {
-  SortableContext,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
+import { useMemo, useState } from "react";
+import pb from "@/lib/pb";
+import WorkerCard from "./WorkerCard";
+import DefaultWorkerModal from "./DefaultWorkerModal";
+import { isAdminOrBoss } from "@/lib/roles";
+import { filterAvailableWorkers } from "@/lib/planLogic";
 
-import WorkerChip from "./WorkerChip";
+export default function WorkersPanel({
+  workers,
+  stations,
+  plan,
+  days,
+  onDefaultSaved,
+}) {
+  const editable = isAdminOrBoss();
 
-export default function WorkersPanel({ workers, onAction, onDragEnd }) {
-  // ✅ drag only starts after small movement (so clicks work)
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
-    })
-  );
+  // ✅ hide workers who are assigned at least once on every day (Mon–Fri)
+  const available = useMemo(() => {
+    return filterAvailableWorkers(workers || [], plan || {}, days || []);
+  }, [workers, plan, days]);
 
-  // ✅ close any open dropdown when clicking elsewhere
-  useEffect(() => {
-    const close = () => {
-      // we don't manage open state here because WorkerChip manages locally
-      // but you can move open state to parent later
+  const [defaultOpen, setDefaultOpen] = useState(false);
+  const [selectedWorker, setSelectedWorker] = useState(null);
+
+  function handleAction(worker, action) {
+    if (!editable) return;
+
+    if (action === "DEFAULT") {
+      setSelectedWorker(worker);
+      setDefaultOpen(true);
+      return;
+    }
+
+    // later
+    console.log("Action:", action, worker);
+  }
+
+  async function saveDefault({ stationId, days, note }) {
+    if (!editable || !selectedWorker) return;
+
+    const updatePayload = {
+      defaultStation: stationId || null,
+      defaultDays: days || [],
+      defaultNote: note || "",
     };
-    window.addEventListener("pointerdown", close);
-    return () => window.removeEventListener("pointerdown", close);
-  }, []);
+
+    // persist on PB
+    await pb.collection("users").update(selectedWorker.id, updatePayload);
+
+    // ✅ build updated worker object (for local state)
+    const updatedWorker = { ...selectedWorker, ...updatePayload };
+
+    setDefaultOpen(false);
+    setSelectedWorker(null);
+
+    // ✅ tell WeeklyPage to immediately apply into the plan
+    onDefaultSaved?.(updatedWorker);
+  }
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-      <div className="text-sm font-semibold mb-2">Workers</div>
+    <div className="rounded-2xl border border-white/10 bg-black/20 p-2">
+      <div className="flex items-center justify-between px-1">
+        <div className="text-sm font-semibold">Workers</div>
+        <div className="text-xs text-white/50">
+          {available.length}/{(workers || []).length}
+        </div>
+      </div>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={onDragEnd}
-      >
-        <SortableContext
-          items={workers.map((w) => String(w.id))}
-          strategy={verticalListSortingStrategy}
-        >
-          <div className="space-y-2 overflow-visible">
-            {workers.map((w) => (
-              <WorkerChip key={w.id} worker={w} onAction={onAction} />
-            ))}
+      <div className="mt-2 space-y-2">
+        {available.map((w) => (
+          <WorkerCard key={w.id} worker={w} onAction={handleAction} />
+        ))}
+
+        {available.length === 0 && (
+          <div className="text-xs text-white/50 px-1 py-2">
+            All workers are assigned for the full week.
           </div>
-        </SortableContext>
-      </DndContext>
+        )}
+      </div>
+
+      <DefaultWorkerModal
+        open={defaultOpen}
+        onClose={() => {
+          setDefaultOpen(false);
+          setSelectedWorker(null);
+        }}
+        worker={selectedWorker}
+        stations={stations}
+        initial={{
+          stationId: selectedWorker?.defaultStation || "",
+          days: selectedWorker?.defaultDays || [],
+          note: selectedWorker?.defaultNote || "",
+        }}
+        onSave={saveDefault}
+      />
     </div>
   );
 }
